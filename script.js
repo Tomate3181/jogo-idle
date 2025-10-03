@@ -101,22 +101,9 @@ function create() {
     createShop(this);
 }
 
-function update() {
-    player.setVelocity(0);
-    if(cursors.left.isDown) player.setVelocityX(-playerSpeed);
-    if(cursors.right.isDown) player.setVelocityX(playerSpeed);
-    if(cursors.up.isDown) player.setVelocityY(-playerSpeed);
-    if(cursors.down.isDown) player.setVelocityY(playerSpeed);
-
-    // Ímã ativo
-    if(magnetActive){
-        coins.getChildren().forEach(coin => {
-            if(coin.active){
-                this.physics.moveToObject(coin, player, 200);
-            }
-        });
-    }
-}
+// Parâmetros do ímã
+let baseMagnetSpeed = 50;  // nível 1
+let baseMagnetRange = 100; // pixels nível 1
 
 function collectCoin(player, coin) {
     coin.disableBody(true, true);
@@ -126,16 +113,95 @@ function collectCoin(player, coin) {
 }
 
 // Spawn de moedas aleatórias
+// Use estas constantes (defina no topo junto com outras variáveis)
+const GAME_WIDTH = 800;   // área de jogo onde player e moedas devem permanecer
+const GAME_HEIGHT = 600;
+const COLLECT_DISTANCE = 24; // distância (px) em que a moeda é coletada automaticamente
+
+// Spawn de moedas (assegura corpo e limites)
 function spawnCoins(scene){
     let currentCoins = coins.getChildren().filter(c => c.active).length;
     while(currentCoins < maxCoins){
         let x = Phaser.Math.Between(50, 750);
         let y = Phaser.Math.Between(50, 550);
+        // criar como physics sprite para acessar body facilmente
         let coin = coins.create(x, y, 'coin').setScale(0.1);
         coin.setActive(true).setVisible(true);
+
+        // garantia: o body existe e respeita world bounds (vamos optar por travar posição)
+        if (coin.body) {
+            coin.body.setCollideWorldBounds(false); // não rebater; vamos clamp manualmente
+        }
+
         currentCoins++;
     }
 }
+
+// update() — lógica do ímã melhorada e proteção contra sair do mundo
+function update() {
+    player.setVelocity(0);
+    if(cursors.left.isDown) player.setVelocityX(-playerSpeed);
+    if(cursors.right.isDown) player.setVelocityX(playerSpeed);
+    if(cursors.up.isDown) player.setVelocityY(-playerSpeed);
+    if(cursors.down.isDown) player.setVelocityY(playerSpeed);
+
+    // Ímã: somente se nível > 0 (ímã passivo por nível). Fazemos controle por distância.
+    if(magnetLevel > 0){
+        // parâmetros escaláveis por nível
+        const baseMagnetSpeed = 80; // velocidade base
+        const baseMagnetRange = 100; // alcance base
+        const magnetSpeed = baseMagnetSpeed + (magnetLevel - 1) * 60; // aumenta por nível
+        const magnetRange = baseMagnetRange + (magnetLevel - 1) * 80; // alcance aumenta por nível
+
+        coins.getChildren().forEach(coin => {
+            if(!coin.active) return;
+
+            // distância entre player e moeda
+            const dist = Phaser.Math.Distance.Between(player.x, player.y, coin.x, coin.y);
+
+            // se estiver dentro do alcance, atraímos; a velocidade diminui conforme se aproxima
+            if(dist <= magnetRange){
+                // velocidade proporcional (mais perto -> mais fraco para evitar overshoot)
+                const speedFactor = Phaser.Math.Clamp((dist / magnetRange), 0.2, 1);
+                const appliedSpeed = magnetSpeed * speedFactor;
+
+                // mover em direção ao player
+                // Usamos vetores para aplicar velocidade sem ficar "dirigindo" ao ponto que se move
+                const angle = Phaser.Math.Angle.Between(coin.x, coin.y, player.x, player.y);
+                const vx = Math.cos(angle) * appliedSpeed;
+                const vy = Math.sin(angle) * appliedSpeed;
+                coin.body.setVelocity(vx, vy);
+
+                // se estiver muito perto, coletar imediatamente
+                if(dist <= COLLECT_DISTANCE){
+                    collectCoin(player, coin);
+                }
+            } else {
+                // fora do alcance: parar movimento para evitar drift contínuo
+                coin.body.setVelocity(0, 0);
+            }
+
+            // Proteção extra: se a moeda tiver saído dos limites do mundo, colocamos ela de volta dentro (clamp)
+            if(coin.x < 0 || coin.x > GAME_WIDTH || coin.y < 0 || coin.y > GAME_HEIGHT){
+                // trava dentro da área de jogo (com padding)
+                coin.x = Phaser.Math.Clamp(coin.x, 16, GAME_WIDTH - 16);
+                coin.y = Phaser.Math.Clamp(coin.y, 16, GAME_HEIGHT - 16);
+                coin.body.setVelocity(0, 0);
+            }
+        });
+    } else {
+        // se ímã não ativo, garantir que moedas não fiquem com velocidade residual
+        coins.getChildren().forEach(coin => {
+            if(coin.active && coin.body){
+                // se o corpo tiver velocidade pequena, zera
+                if(Math.abs(coin.body.velocity.x) < 1 && Math.abs(coin.body.velocity.y) < 1){
+                    coin.body.setVelocity(0, 0);
+                }
+            }
+        });
+    }
+}
+
 
 // --- LOJA ---
 function createShop(scene) {
