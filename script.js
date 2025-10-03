@@ -55,7 +55,7 @@ function saveGame() {
 
 function loadGame() {
     const saved = localStorage.getItem('idleGameSave');
-    if(saved){
+    if (saved) {
         const data = JSON.parse(saved);
         score = data.score || 0;
         speedLevel = data.speedLevel || 1;
@@ -99,6 +99,15 @@ function create() {
 
     // Criar a loja fora da área principal
     createShop(this);
+
+     // Grupo de inimigos
+    enemies = this.physics.add.group();
+
+    // spawn inicial
+    spawnEnemy(this);
+
+    // colisão inimigo ↔ player
+    this.physics.add.overlap(player, enemies, hitEnemy, null, this);
 }
 
 // Parâmetros do ímã
@@ -119,9 +128,9 @@ const GAME_HEIGHT = 600;
 const COLLECT_DISTANCE = 24; // distância (px) em que a moeda é coletada automaticamente
 
 // Spawn de moedas (assegura corpo e limites)
-function spawnCoins(scene){
+function spawnCoins(scene) {
     let currentCoins = coins.getChildren().filter(c => c.active).length;
-    while(currentCoins < maxCoins){
+    while (currentCoins < maxCoins) {
         let x = Phaser.Math.Between(50, 750);
         let y = Phaser.Math.Between(50, 550);
         // criar como physics sprite para acessar body facilmente
@@ -140,13 +149,13 @@ function spawnCoins(scene){
 // update() — lógica do ímã melhorada e proteção contra sair do mundo
 function update() {
     player.setVelocity(0);
-    if(cursors.left.isDown) player.setVelocityX(-playerSpeed);
-    if(cursors.right.isDown) player.setVelocityX(playerSpeed);
-    if(cursors.up.isDown) player.setVelocityY(-playerSpeed);
-    if(cursors.down.isDown) player.setVelocityY(playerSpeed);
+    if (cursors.left.isDown) player.setVelocityX(-playerSpeed);
+    if (cursors.right.isDown) player.setVelocityX(playerSpeed);
+    if (cursors.up.isDown) player.setVelocityY(-playerSpeed);
+    if (cursors.down.isDown) player.setVelocityY(playerSpeed);
 
     // Ímã: somente se nível > 0 (ímã passivo por nível). Fazemos controle por distância.
-    if(magnetLevel > 0){
+    if (magnetLevel > 0) {
         // parâmetros escaláveis por nível
         const baseMagnetSpeed = 80; // velocidade base
         const baseMagnetRange = 100; // alcance base
@@ -154,35 +163,34 @@ function update() {
         const magnetRange = baseMagnetRange + (magnetLevel - 1) * 80; // alcance aumenta por nível
 
         coins.getChildren().forEach(coin => {
-            if(!coin.active) return;
+            if (!coin.active) return;
 
             // distância entre player e moeda
             const dist = Phaser.Math.Distance.Between(player.x, player.y, coin.x, coin.y);
 
             // se estiver dentro do alcance, atraímos; a velocidade diminui conforme se aproxima
-            if(dist <= magnetRange){
-                // velocidade proporcional (mais perto -> mais fraco para evitar overshoot)
-                const speedFactor = Phaser.Math.Clamp((dist / magnetRange), 0.2, 1);
-                const appliedSpeed = magnetSpeed * speedFactor;
+            if (dist <= magnetRange) {
+                // quanto mais perto, mais rápido (inverso do que estava antes)
+                const speedFactor = Phaser.Math.Clamp(1 - (dist / magnetRange), 0.2, 1);
+                const appliedSpeed = magnetSpeed * (0.5 + speedFactor);
+                // 0.5 é pra nunca ficar muito lento
 
-                // mover em direção ao player
-                // Usamos vetores para aplicar velocidade sem ficar "dirigindo" ao ponto que se move
                 const angle = Phaser.Math.Angle.Between(coin.x, coin.y, player.x, player.y);
                 const vx = Math.cos(angle) * appliedSpeed;
                 const vy = Math.sin(angle) * appliedSpeed;
                 coin.body.setVelocity(vx, vy);
 
-                // se estiver muito perto, coletar imediatamente
-                if(dist <= COLLECT_DISTANCE){
+                // coleta automática se estiver colado
+                if (dist <= COLLECT_DISTANCE) {
                     collectCoin(player, coin);
                 }
             } else {
-                // fora do alcance: parar movimento para evitar drift contínuo
                 coin.body.setVelocity(0, 0);
             }
 
+
             // Proteção extra: se a moeda tiver saído dos limites do mundo, colocamos ela de volta dentro (clamp)
-            if(coin.x < 0 || coin.x > GAME_WIDTH || coin.y < 0 || coin.y > GAME_HEIGHT){
+            if (coin.x < 0 || coin.x > GAME_WIDTH || coin.y < 0 || coin.y > GAME_HEIGHT) {
                 // trava dentro da área de jogo (com padding)
                 coin.x = Phaser.Math.Clamp(coin.x, 16, GAME_WIDTH - 16);
                 coin.y = Phaser.Math.Clamp(coin.y, 16, GAME_HEIGHT - 16);
@@ -192,14 +200,18 @@ function update() {
     } else {
         // se ímã não ativo, garantir que moedas não fiquem com velocidade residual
         coins.getChildren().forEach(coin => {
-            if(coin.active && coin.body){
+            if (coin.active && coin.body) {
                 // se o corpo tiver velocidade pequena, zera
-                if(Math.abs(coin.body.velocity.x) < 1 && Math.abs(coin.body.velocity.y) < 1){
+                if (Math.abs(coin.body.velocity.x) < 1 && Math.abs(coin.body.velocity.y) < 1) {
                     coin.body.setVelocity(0, 0);
                 }
             }
         });
     }
+
+     enemies.getChildren().forEach(enemy => {
+        this.physics.moveToObject(enemy, player, 80); // velocidade de perseguição
+    });
 }
 
 
@@ -235,11 +247,11 @@ function createShop(scene) {
 
         // Texto do botão
         let level = 0;
-        if(upgrade.key === 'Velocidade') level = speedLevel;
-        if(upgrade.key === 'Mais Moedas') level = coinLevel;
-        if(upgrade.key === 'Ímã') level = magnetLevel;
+        if (upgrade.key === 'Velocidade') level = speedLevel;
+        if (upgrade.key === 'Mais Moedas') level = coinLevel;
+        if (upgrade.key === 'Ímã') level = magnetLevel;
 
-        let btnText = scene.add.text(90, yPos + 35, `${upgrade.key} (Nível ${level})\nPreço: ${upgrade.cost}`, 
+        let btnText = scene.add.text(90, yPos + 35, `${upgrade.key} (Nível ${level})\nPreço: ${upgrade.cost}`,
             { fontSize: '14px', fill: '#fff', align: 'center' }).setOrigin(0.5);
         shopContainer.add(btnText);
         shopTexts[upgrade.key] = btnText;
@@ -257,7 +269,7 @@ function createShop(scene) {
 
 // --- Funções de upgrade ---
 function buySpeed(scene) {
-    if(score >= upgradeCostSpeed){
+    if (score >= upgradeCostSpeed) {
         score -= upgradeCostSpeed;
         playerSpeed += 50;
         upgradeCostSpeed += 50;
@@ -269,7 +281,7 @@ function buySpeed(scene) {
 }
 
 function buyCoins(scene) {
-    if(score >= upgradeCostCoins){
+    if (score >= upgradeCostCoins) {
         score -= upgradeCostCoins;
         maxCoins += 1;
         upgradeCostCoins += 50;
@@ -281,7 +293,7 @@ function buyCoins(scene) {
 }
 
 function buyMagnet(scene) {
-    if(score >= magnetCost){
+    if (score >= magnetCost) {
         score -= magnetCost;
         magnetLevel += 1;
         magnetCost += 100;
@@ -294,6 +306,25 @@ function buyMagnet(scene) {
             magnetActive = false;
         });
     }
+}
+
+function spawnEnemy(scene) {
+    let x = Phaser.Math.Between(50, 750);
+    let y = Phaser.Math.Between(50, 550);
+    let enemy = scene.add.rectangle(x, y, 30, 30, 0xff0000); // quadrado vermelho
+    scene.physics.add.existing(enemy);
+    enemy.body.setCollideWorldBounds(true);
+    enemies.add(enemy);
+}
+
+function hitEnemy(player, enemy) {
+    // exemplo: perder pontos
+    score = Math.max(0, score - 20);
+    scoreText.setText('Pontos: ' + score);
+
+    // opcional: empurrar player ou piscar
+    player.setTint(0xff0000);
+    scene.time.delayedCall(200, () => player.clearTint());
 }
 
 // Atualiza textos da loja
