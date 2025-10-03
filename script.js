@@ -69,8 +69,24 @@ function loadGame() {
     }
 }
 
+let currentWeapon = 'pistol';
+let inventory = ['pistol', 'sword'];
+let bullets;
+let lastShot = 0; // cooldown
+let fireRate = 300; // ms entre tiros
+let pointer;
+
 function create() {
     loadGame(); // carrega progresso salvo
+
+    // substitui cursors
+    keys = this.input.keyboard.addKeys({
+        up: Phaser.Input.Keyboard.KeyCodes.W,
+        down: Phaser.Input.Keyboard.KeyCodes.S,
+        left: Phaser.Input.Keyboard.KeyCodes.A,
+        right: Phaser.Input.Keyboard.KeyCodes.D
+    });
+
 
     // Player
     player = this.physics.add.sprite(400, 300, 'player')
@@ -100,7 +116,7 @@ function create() {
     // Criar a loja fora da área principal
     createShop(this);
 
-     // Grupo de inimigos
+    // Grupo de inimigos
     enemies = this.physics.add.group();
 
     // spawn inicial
@@ -108,7 +124,62 @@ function create() {
 
     // colisão inimigo ↔ player
     this.physics.add.overlap(player, enemies, hitEnemy, null, this);
+
+    // Grupo de projéteis
+    bullets = this.physics.add.group();
+
+    // Input troca de armas
+    this.input.keyboard.on('keydown-ONE', () => {
+        currentWeapon = 'pistol';
+        updateHUD();
+    });
+    this.input.keyboard.on('keydown-TWO', () => {
+        currentWeapon = 'sword';
+        updateHUD();
+    });
+
+
+
+    // Colisão balas ↔ inimigos
+    this.physics.add.overlap(bullets, enemies, bulletHitEnemy, null, this);
+
+    // Guardar o mouse
+    pointer = this.input.activePointer;
+
+    // HUD container
+    hudTexts = {}; // vai guardar referências para atualizar
+
+    const startX = config.width - 150; // canto direito
+    const startY = config.height - 80; // canto inferior
+    const spacingY = 40;
+
+    inventory.forEach((weapon, index) => {
+        // fundo da caixinha
+        let bg = this.add.rectangle(startX + 50, startY - index * spacingY, 120, 30, 0x20232a, 0.8);
+        bg.setStrokeStyle(2, 0xffffff, 0.3); // borda sutil
+        bg.setOrigin(0.5);
+
+        // texto da arma
+        let text = this.add.text(startX + 50, startY - index * spacingY, weapon.toUpperCase(), {
+            font: '18px "Arial"',
+            fill: weapon === currentWeapon ? '#FFD700' : '#FFFFFF' // amarelo se selecionada
+        }).setOrigin(0.5);
+
+        hudTexts[weapon] = text;
+    });
+
+
 }
+
+function updateHUD() {
+    inventory.forEach(weapon => {
+        if (hudTexts[weapon]) {
+            hudTexts[weapon].setColor(weapon === currentWeapon ? '#FFD700' : '#FFFFFF');
+        }
+    });
+}
+
+
 
 // Parâmetros do ímã
 let baseMagnetSpeed = 50;  // nível 1
@@ -146,41 +217,41 @@ function spawnCoins(scene) {
     }
 }
 
-// update() — lógica do ímã melhorada e proteção contra sair do mundo
-function update() {
+function update(time, delta) {
+    // ---- Movimento do player ----
     player.setVelocity(0);
-    if (cursors.left.isDown) player.setVelocityX(-playerSpeed);
-    if (cursors.right.isDown) player.setVelocityX(playerSpeed);
-    if (cursors.up.isDown) player.setVelocityY(-playerSpeed);
-    if (cursors.down.isDown) player.setVelocityY(playerSpeed);
 
-    // Ímã: somente se nível > 0 (ímã passivo por nível). Fazemos controle por distância.
+    if (keys.left.isDown) player.setVelocityX(-playerSpeed);
+    if (keys.right.isDown) player.setVelocityX(playerSpeed);
+    if (keys.up.isDown) player.setVelocityY(-playerSpeed);
+    if (keys.down.isDown) player.setVelocityY(playerSpeed);
+
+
+    // ---- Player mira para o mouse ----
+    let angle = Phaser.Math.Angle.Between(player.x, player.y, pointer.worldX, pointer.worldY);
+    player.setRotation(angle);
+
+    // ---- Ímã puxando moedas ----
     if (magnetLevel > 0) {
-        // parâmetros escaláveis por nível
-        const baseMagnetSpeed = 80; // velocidade base
-        const baseMagnetRange = 100; // alcance base
-        const magnetSpeed = baseMagnetSpeed + (magnetLevel - 1) * 60; // aumenta por nível
-        const magnetRange = baseMagnetRange + (magnetLevel - 1) * 80; // alcance aumenta por nível
+        const baseMagnetSpeed = 80;
+        const baseMagnetRange = 100;
+        const magnetSpeed = baseMagnetSpeed + (magnetLevel - 1) * 60;
+        const magnetRange = baseMagnetRange + (magnetLevel - 1) * 80;
 
         coins.getChildren().forEach(coin => {
             if (!coin.active) return;
 
-            // distância entre player e moeda
             const dist = Phaser.Math.Distance.Between(player.x, player.y, coin.x, coin.y);
 
-            // se estiver dentro do alcance, atraímos; a velocidade diminui conforme se aproxima
             if (dist <= magnetRange) {
-                // quanto mais perto, mais rápido (inverso do que estava antes)
                 const speedFactor = Phaser.Math.Clamp(1 - (dist / magnetRange), 0.2, 1);
                 const appliedSpeed = magnetSpeed * (0.5 + speedFactor);
-                // 0.5 é pra nunca ficar muito lento
 
-                const angle = Phaser.Math.Angle.Between(coin.x, coin.y, player.x, player.y);
-                const vx = Math.cos(angle) * appliedSpeed;
-                const vy = Math.sin(angle) * appliedSpeed;
+                const cAngle = Phaser.Math.Angle.Between(coin.x, coin.y, player.x, player.y);
+                const vx = Math.cos(cAngle) * appliedSpeed;
+                const vy = Math.sin(cAngle) * appliedSpeed;
                 coin.body.setVelocity(vx, vy);
 
-                // coleta automática se estiver colado
                 if (dist <= COLLECT_DISTANCE) {
                     collectCoin(player, coin);
                 }
@@ -188,31 +259,31 @@ function update() {
                 coin.body.setVelocity(0, 0);
             }
 
-
-            // Proteção extra: se a moeda tiver saído dos limites do mundo, colocamos ela de volta dentro (clamp)
+            // clamp dentro da área
             if (coin.x < 0 || coin.x > GAME_WIDTH || coin.y < 0 || coin.y > GAME_HEIGHT) {
-                // trava dentro da área de jogo (com padding)
                 coin.x = Phaser.Math.Clamp(coin.x, 16, GAME_WIDTH - 16);
                 coin.y = Phaser.Math.Clamp(coin.y, 16, GAME_HEIGHT - 16);
                 coin.body.setVelocity(0, 0);
             }
         });
-    } else {
-        // se ímã não ativo, garantir que moedas não fiquem com velocidade residual
-        coins.getChildren().forEach(coin => {
-            if (coin.active && coin.body) {
-                // se o corpo tiver velocidade pequena, zera
-                if (Math.abs(coin.body.velocity.x) < 1 && Math.abs(coin.body.velocity.y) < 1) {
-                    coin.body.setVelocity(0, 0);
-                }
-            }
-        });
     }
 
-     enemies.getChildren().forEach(enemy => {
-        this.physics.moveToObject(enemy, player, 80); // velocidade de perseguição
+    // ---- Inimigos perseguindo ----
+    enemies.getChildren().forEach(enemy => {
+        this.physics.moveToObject(enemy, player, 80);
     });
+
+    // ---- Armas ----
+    if (pointer.isDown) {
+        if (currentWeapon === 'pistol' && time > lastShot + fireRate) {
+            shootBullet(this, angle);
+            lastShot = time;
+        } else if (currentWeapon === 'sword') {
+            swordAttack(this, angle);
+        }
+    }
 }
+
 
 
 // --- LOJA ---
@@ -332,4 +403,51 @@ function updateShop() {
     shopTexts['Velocidade'].setText(`Velocidade (Nível ${speedLevel})\nPreço: ${upgradeCostSpeed}`);
     shopTexts['Mais Moedas'].setText(`Mais Moedas (Nível ${coinLevel})\nPreço: ${upgradeCostCoins}`);
     shopTexts['Ímã'].setText(`Ímã (Nível ${magnetLevel})\nPreço: ${magnetCost}`);
+}
+
+// armas
+
+// ---- Pistola ----
+function shootBullet(scene, angle) {
+    let bullet = scene.add.rectangle(player.x, player.y, 8, 4, 0xffffff);
+    scene.physics.add.existing(bullet);
+    bullets.add(bullet);
+    bullet.body.setAllowGravity(false);
+
+    // velocidade na direção do mouse
+    scene.physics.velocityFromRotation(angle, 400, bullet.body.velocity);
+
+    // destruir após 2s
+    scene.time.delayedCall(2000, () => bullet.destroy());
+}
+
+// ---- Espada ----
+function swordAttack(scene, angle) {
+    if (scene.swordSwinging) return; // evita spammar
+    scene.swordSwinging = true;
+
+    // Hitbox a uma distância à frente do player
+    let distance = 40;
+    let offsetX = Math.cos(angle) * distance;
+    let offsetY = Math.sin(angle) * distance;
+
+    let hitbox = scene.add.rectangle(player.x + offsetX, player.y + offsetY, 50, 30, 0x00ff00, 0.3);
+    scene.physics.add.existing(hitbox);
+    hitbox.body.enable = true;
+
+    scene.physics.add.overlap(hitbox, enemies, (box, enemy) => {
+        enemy.destroy();
+    });
+
+    // remover hitbox rapidinho
+    scene.time.delayedCall(200, () => {
+        hitbox.destroy();
+        scene.swordSwinging = false;
+    });
+}
+
+// ---- Colisão balas ↔ inimigos ----
+function bulletHitEnemy(bullet, enemy) {
+    bullet.destroy();
+    enemy.destroy();
 }
