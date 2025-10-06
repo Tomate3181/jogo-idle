@@ -1,0 +1,76 @@
+const config = {
+    GAME_WIDTH: 1000,
+    GAME_HEIGHT: 600,
+    DEBUG_MODE: true, // Defina como true para ver os bodies de física
+
+    // Player
+    PLAYER_INITIAL_SPEED: 100,
+    PLAYER_INITIAL_HEALTH: 100,
+    PLAYER_INITIAL_MAX_HEALTH: 100,
+    PLAYER_INITIAL_DAMAGE: 10,
+    PLAYER_HIT_COOLDOWN: 500, // Tempo em ms entre hits do player por inimigos
+
+    // Coins
+    COIN_INITIAL_MAX_ON_SCREEN: 2,
+    COIN_SPAWN_INTERVAL: 2000, // ms
+    COIN_POINTS_VALUE: 5,
+    COIN_COLLECT_DISTANCE: 24, // Distância em px para coleta automática (ímã)
+    
+    // Magnet Upgrade
+    MAGNET_BASE_SPEED: 80,
+    MAGNET_BASE_RANGE: 100,
+    MAGNET_SPEED_PER_LEVEL: 60,
+    MAGNET_RANGE_PER_LEVEL: 80,
+
+    // Upgrades Costs (Initial)
+    UPGRADE_COST_SPEED_INITIAL: 50,
+    UPGRADE_COST_COINS_INITIAL: 100,
+    UPGRADE_COST_MAGNET_INITIAL: 150,
+    UPGRADE_COST_MAX_HEALTH_INITIAL: 75,
+    UPGRADE_COST_DAMAGE_INITIAL: 100,
+
+    // Upgrades Cost Increase
+    UPGRADE_INCREASE_SPEED: 50,
+    UPGRADE_INCREASE_COINS: 50,
+    UPGRADE_INCREASE_MAGNET: 100,
+    UPGRADE_INCREASE_MAX_HEALTH: 25,
+    UPGRADE_INCREASE_DAMAGE: 50,
+    
+    // Enemies
+    ENEMY_INITIAL_HEALTH: 30,
+    ENEMY_INITIAL_SPEED: 80,
+    ENEMY_INITIAL_DAMAGE: 10,
+    ENEMY_SPAWN_INTERVAL: 3000, // ms
+    ENEMY_INITIAL_MAX_ON_SCREEN: 3,
+
+    // Waves
+    WAVE_INTERVAL: 10000, // ms (30 segundos)
+    WAVE_ENEMY_HEALTH_INCREASE: 10,
+    WAVE_ENEMY_SPEED_INCREASE: 5,
+    WAVE_ENEMY_DAMAGE_INCREASE: 2,
+    WAVE_ENEMY_MAX_INCREASE_FREQ: 2, // Aumenta max_enemies a cada N ondas
+    WAVE_ENEMY_MAX_AMOUNT_INCREASE: 1, // Quanto aumenta o max_enemies
+
+    // Weapons
+    BULLET_SPEED: 400,
+    BULLET_LIFETIME: 2000, // ms
+    PISTOL_FIRERATE: 300, // ms
+    SWORD_ATTACK_COOLDOWN: 500, // ms
+    SWORD_ATTACK_DISTANCE: 40, // px do player
+    SWORD_HITBOX_WIDTH: 50,
+    SWORD_HITBOX_HEIGHT: 30,
+    SWORD_HITBOX_LIFETIME: 200, // ms
+
+    // UI
+    HUD_OFFSET_X: 150, // do lado direito
+    HUD_OFFSET_Y: 80, // do lado de baixo
+    HUD_WEAPON_SPACING_Y: 40,
+
+    SHOP_POSITION_X: 820,
+    SHOP_POSITION_Y: 50,
+    SHOP_ITEM_SPACING_Y: 80,
+    SHOP_ITEM_WIDTH: 160,
+    SHOP_ITEM_HEIGHT: 70,
+};
+
+export default config;
