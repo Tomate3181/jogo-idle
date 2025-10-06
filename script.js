@@ -57,12 +57,18 @@ let healthText;
 let enemySpawnTimer;
 let maxEnemies = 3; // Quantidade máxima de inimigos na tela
 
+// --- VARIÁVEIS DE PROGRESSÃO POR TEMPO (ONDAS) ---
+let currentWave = 0;
+let waveText;
+let waveTimerEvent;
+const WAVE_INTERVAL = 30000; // 30 segundos por onda
+let baseEnemyHealth = 30;
+let baseEnemySpeed = 80;
+let baseEnemyDamage = 10;
+
 function preload() {
     this.load.image('player', 'player.png');
     this.load.image('coin', 'coin.png');
-    // **NOVO:** Carregue uma imagem para o inimigo. Se não tiver, pode usar um quadrado simples.
-    // Para fins de teste, vou simular um "quadrado vermelho" como textura.
-    // Você pode substituir 'red_square' por 'enemy.png' se tiver uma imagem.
     this.load.image('red_square', 'enemy.png'); // Imagem temporária de quadrado vermelho
 }
 
@@ -72,7 +78,8 @@ function saveGame() {
         score, speedLevel, coinLevel, magnetLevel,
         playerSpeed, maxCoins,
         upgradeCostSpeed, upgradeCostCoins, magnetCost,
-        playerHealth, playerMaxHealth, playerDamage // Salvar atributos de combate
+        playerHealth, playerMaxHealth, playerDamage,
+        currentWave // Salvar a onda atual
     };
     localStorage.setItem('idleGameSave', JSON.stringify(saveData));
 }
@@ -94,6 +101,8 @@ function loadGame() {
         playerHealth = data.playerHealth !== undefined ? data.playerHealth : 100;
         playerMaxHealth = data.playerMaxHealth !== undefined ? data.playerMaxHealth : 100;
         playerDamage = data.playerDamage !== undefined ? data.playerDamage : 10;
+        
+        currentWave = data.currentWave !== undefined ? data.currentWave : 0; // Carrega a onda
     }
 }
 
@@ -126,6 +135,8 @@ function create() {
     scoreText = this.add.text(16, 16, `Pontos: ${score}`, { fontSize: '24px', fill: '#fff' });
     // Texto da saúde do jogador
     healthText = this.add.text(16, 48, `Vida: ${player.health}/${player.maxHealth}`, { fontSize: '24px', fill: '#0f0' });
+    // Texto da onda
+    waveText = this.add.text(16, 80, `Onda: ${currentWave}`, { fontSize: '24px', fill: '#00f' });
 
     // Colisão player-moeda
     this.physics.add.overlap(player, coins, collectCoin, null, this);
@@ -143,7 +154,10 @@ function create() {
     // Grupo de inimigos
     enemies = this.physics.add.group();
 
-    // Spawn inicial e contínuo de inimigos
+    // Inicia a primeira onda (ou a onda salva)
+    increaseDifficulty.call(this); // Chama uma vez para configurar a primeira onda
+
+    // Spawn contínuo de inimigos (agora usa maxEnemies atualizado pela onda)
     enemySpawnTimer = this.time.addEvent({
         delay: 3000, // Spawn a cada 3 segundos
         callback: () => {
@@ -153,6 +167,15 @@ function create() {
         },
         loop: true
     });
+
+    // Timer para aumentar a dificuldade (ondas)
+    waveTimerEvent = this.time.addEvent({
+        delay: WAVE_INTERVAL,
+        callback: increaseDifficulty,
+        callbackScope: this, // Garante que 'this' dentro de increaseDifficulty seja a cena
+        loop: true
+    });
+
 
     // Colisão inimigo ↔ player
     this.physics.add.overlap(player, enemies, hitEnemy, null, this);
@@ -206,6 +229,7 @@ function updateHUD() {
         }
     });
     healthText.setText(`Vida: ${player.health}/${player.maxHealth}`);
+    waveText.setText(`Onda: ${currentWave}`);
 }
 
 // Parâmetros do ímã
@@ -434,40 +458,57 @@ function buyPlayerDamage(scene) {
     }
 }
 
+// --- FUNÇÃO PARA AUMENTAR A DIFICULDADE (ONDAS) ---
+function increaseDifficulty() {
+    currentWave++;
+    waveText.setText(`Onda: ${currentWave}`);
+
+    // Aumenta a saúde e velocidade dos inimigos
+    baseEnemyHealth += 10; // Aumenta 10 de vida por onda
+    baseEnemySpeed += 5; // Aumenta 5 de velocidade por onda
+    baseEnemyDamage += 2; // Aumenta 2 de dano por onda
+
+    // Aumenta o número máximo de inimigos (a cada 2 ondas, por exemplo)
+    if (currentWave % 2 === 0) {
+        maxEnemies += 1;
+    }
+
+    // Opcional: Efeito visual ou sonoro ao iniciar uma nova onda
+    this.cameras.main.shake(100, 0.005); // Pequeno shake na câmera
+
+    saveGame(); // Salva a nova onda
+}
 
 function spawnEnemy(scene) {
     let x = Phaser.Math.Between(50, 750);
     let y = Phaser.Math.Between(50, 550);
-    // **CORREÇÃO AQUI:** Crie o inimigo como um sprite
     let enemy = scene.physics.add.sprite(x, y, 'red_square')
-        .setScale(1); // Reduzi a escala para 30x30 pixels (imagem placeholder é 30x30)
+        .setScale(1);
     enemy.body.setCollideWorldBounds(true);
-    enemy.health = 30; // Vida do inimigo
-    enemy.damage = 10; // Dano do inimigo
-    enemy.speed = 80; // Velocidade do inimigo
+    // Atributos do inimigo são baseados nos valores atuais da onda
+    enemy.health = baseEnemyHealth; 
+    enemy.damage = baseEnemyDamage; 
+    enemy.speed = baseEnemySpeed; 
     enemies.add(enemy);
 }
 
 function hitEnemy(player, enemy) {
-    // Adiciona cooldown para o player não tomar dano o tempo todo
     if (!player.lastHitTime) player.lastHitTime = 0;
-    const hitCooldown = 500; // Meio segundo de cooldown para tomar dano
+    const hitCooldown = 500;
 
     if (this.time.now > player.lastHitTime + hitCooldown) {
         player.health -= enemy.damage;
         player.lastHitTime = this.time.now;
 
-        // Feedback visual
-        player.setTint(0xff0000); // Vermelho
+        player.setTint(0xff0000);
         this.time.delayedCall(200, () => player.clearTint());
 
-        updateHUD(); // Atualiza a saúde na HUD
+        updateHUD();
 
         if (player.health <= 0) {
-            // GAME OVER
-            this.scene.restart(); // Reinicia a cena
-            score = 0; // Zera a pontuação
-            // Reinicia outros estados do jogo
+            // GAME OVER - Reinicia tudo
+            this.scene.restart();
+            score = 0;
             playerSpeed = 100;
             maxCoins = 2;
             coinSpawnInterval = 2000;
@@ -480,7 +521,12 @@ function hitEnemy(player, enemy) {
             playerHealth = 100;
             playerMaxHealth = 100;
             playerDamage = 10;
-            saveGame(); // Salva o jogo resetado
+            currentWave = 0; // Reseta a onda
+            baseEnemyHealth = 30; // Reseta atributos base do inimigo
+            baseEnemySpeed = 80;
+            baseEnemyDamage = 10;
+            maxEnemies = 3; // Reseta max inimigos
+            saveGame();
         }
     }
 }
@@ -491,7 +537,6 @@ function updateShop() {
     shopTexts['Mais Moedas'].setText(`Mais Moedas (Nível ${coinLevel})\nPreço: ${upgradeCostCoins}`);
     shopTexts['Ímã'].setText(`Ímã (Nível ${magnetLevel})\nPreço: ${magnetCost}`);
     
-    // Atualiza os novos upgrades
     let maxHealthLevel = Math.floor((playerMaxHealth - 100) / 25) + 1;
     let maxHealthCost = 75 + (maxHealthLevel - 1) * 25;
     shopTexts['Vida Max'].setText(`Vida Max (Nível ${maxHealthLevel})\nPreço: ${maxHealthCost}`);
@@ -505,47 +550,39 @@ function updateShop() {
 
 // ---- Pistola ----
 function shootBullet(scene, angle) {
-    // Balas também podem ser sprites se você quiser texturas
     let bullet = scene.add.rectangle(player.x, player.y, 8, 4, 0xffffff);
     scene.physics.add.existing(bullet);
     bullets.add(bullet);
     bullet.body.setAllowGravity(false);
-    bullet.damage = player.damage; // Bala causa o dano do player
+    bullet.damage = player.damage;
 
-    // velocidade na direção do mouse
     scene.physics.velocityFromRotation(angle, 400, bullet.body.velocity);
 
-    // destruir após 2s
     scene.time.delayedCall(2000, () => bullet.destroy());
 }
 
 // ---- Espada ----
 function swordAttack(scene, angle) {
-    // Hitbox a uma distância à frente do player
     let distance = 40;
     let offsetX = Math.cos(angle) * distance;
     let offsetY = Math.sin(angle) * distance;
 
-    // Hitbox para espada pode continuar sendo um Rectangle, pois ele não precisa de setTint
     let hitbox = scene.add.rectangle(player.x + offsetX, player.y + offsetY, 50, 30, 0x00ff00, 0.3);
     scene.physics.add.existing(hitbox);
     hitbox.body.setAllowGravity(false);
     hitbox.body.enable = true;
-    hitbox.body.setImmovable(true); // Impede que o hitbox seja movido por colisões
-    hitbox.damage = player.damage; // Hitbox da espada causa o dano do player
+    hitbox.body.setImmovable(true);
+    hitbox.damage = player.damage;
 
-    // Usar uma flag para garantir que o inimigo só leve dano uma vez por ataque da espada
     let enemiesHitBySword = new Set(); 
 
     scene.physics.overlap(hitbox, enemies, (box, enemy) => {
         if (!enemiesHitBySword.has(enemy)) {
-            // **Passamos a cena para takeDamage para que ela possa usar time.delayedCall**
             takeDamage.call(scene, enemy, box.damage); 
             enemiesHitBySword.add(enemy);
         }
     });
 
-    // remover hitbox rapidinho
     scene.time.delayedCall(200, () => {
         hitbox.destroy();
     });
@@ -554,29 +591,23 @@ function swordAttack(scene, angle) {
 // ---- Colisão balas ↔ inimigos ----
 function bulletHitEnemy(bullet, enemy) {
     bullet.destroy();
-    // **Passamos a cena para takeDamage para que ela possa usar time.delayedCall**
     takeDamage.call(this, enemy, bullet.damage);
 }
 
 // Nova função para aplicar dano a qualquer entidade (inimigo ou player)
 function takeDamage(target, amount) {
-    // **IMPORTANTE: 'this' aqui se refere à cena devido ao .call(this, ...)**
-    // Garantir que o target ainda existe e é ativo (não foi destruído por outro hit)
     if (!target || !target.active) {
         return;
     }
 
     target.health -= amount;
 
-    // Feedback visual para o inimigo
-    // target.setTint só funciona em Sprites, por isso a alteração em spawnEnemy
-    target.setTint(0xff8888); // Vermelho claro
-    // Usamos 'this.time' porque takeDamage agora está sendo chamada com o contexto da cena
+    target.setTint(0xff8888);
     this.time.delayedCall(150, () => target.clearTint());
 
     if (target.health <= 0) {
         target.destroy();
-        score += 10; // Ganha pontos por matar inimigo
+        score += 10 + currentWave * 2; // Inimigos de ondas mais altas valem mais
         scoreText.setText(`Pontos: ${score}`);
         saveGame();
     }
