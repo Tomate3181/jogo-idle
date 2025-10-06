@@ -10,82 +10,158 @@ class HUD {
         this.scoreText = null;
         this.healthText = null;
         this.waveText = null;
-        this.weaponTexts = {}; // Para armazenar os textos das armas na HUD
+        this.weaponTexts = {};
+        this.weaponBgs = {}; // Para gradiente e neon
 
         this.createHUD(savedData);
     }
 
     createHUD(savedData) {
+        // ----------------------
         // Pontuação
-        this.scoreText = this.scene.add.text(16, 16, `Pontos: ${this.player.score}`, { fontSize: '24px', fill: '#fff' });
+        // ----------------------
+        this.scoreText = this.scene.add.text(16, 16, `Pontos: ${this.player.score}`, {
+            fontSize: '28px',
+            fontFamily: 'Arial',
+            fill: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 5,
+            shadow: { offsetX: 2, offsetY: 2, color: '#000', blur: 4, stroke: true, fill: true }
+        });
 
+        // ----------------------
         // Saúde do jogador
-        this.healthText = this.scene.add.text(16, 48, `Vida: ${this.player.health}/${this.player.maxHealth}`, { fontSize: '24px', fill: '#0f0' });
+        // ----------------------
+        this.healthText = this.scene.add.text(16, 56, `Vida: ${this.player.health}/${this.player.maxHealth}`, {
+            fontSize: '26px',
+            fontFamily: 'Arial',
+            fill: '#0f0',
+            stroke: '#000',
+            strokeThickness: 4
+        });
 
+        // ----------------------
         // Onda
-        this.waveText = this.scene.add.text(16, 80, `Onda: ${savedData.currentWave !== undefined ? savedData.currentWave : 0}`, { fontSize: '24px', fill: '#00f' });
+        // ----------------------
+        this.waveText = this.scene.add.text(16, 96, `Onda: ${savedData.currentWave ?? 0}`, {
+            fontSize: '26px',
+            fontFamily: 'Arial',
+            fill: '#00aaff',
+            stroke: '#000',
+            strokeThickness: 4
+        });
 
-        // Display de armas na HUD
+        // ----------------------
+        // Armas
+        // ----------------------
         const startX = config.GAME_WIDTH - config.HUD_OFFSET_X;
         const startY = config.GAME_HEIGHT - config.HUD_OFFSET_Y;
 
         this.weaponNames.forEach((weapon, index) => {
-            let bg = this.scene.add.rectangle(startX + 50, startY - index * config.HUD_WEAPON_SPACING_Y, 120, 30, 0x20232a, 0.8);
-            bg.setStrokeStyle(2, 0xffffff, 0.3);
+            // Fundo com gradiente neon
+            let bg = this.scene.add.rectangle(
+                startX + 50, 
+                startY - index * config.HUD_WEAPON_SPACING_Y, 
+                120, 
+                30, 
+                0x111111, 
+                0.8
+            );
             bg.setOrigin(0.5);
+            bg.setStrokeStyle(2, 0xffffff, 0.3);
+            this.weaponBgs[weapon.toLowerCase()] = bg;
 
-            let text = this.scene.add.text(startX + 50, startY - index * config.HUD_WEAPON_SPACING_Y, weapon.toUpperCase(), {
-                font: '18px "Arial"',
-                fill: weapon.toLowerCase() === this.initialWeaponName.toLowerCase() ? '#FFD700' : '#FFFFFF'
-            }).setOrigin(0.5);
+            // Texto da arma
+            let text = this.scene.add.text(
+                startX + 50, 
+                startY - index * config.HUD_WEAPON_SPACING_Y, 
+                weapon.toUpperCase(), 
+                {
+                    fontSize: '18px',
+                    fontFamily: 'Arial',
+                    fill: weapon.toLowerCase() === this.initialWeaponName.toLowerCase() ? '#FFD700' : '#FFFFFF',
+                    stroke: '#000',
+                    strokeThickness: 2,
+                    shadow: { offsetX: 1, offsetY: 1, color: '#000', blur: 2, stroke: true, fill: true }
+                }
+            ).setOrigin(0.5);
 
             this.weaponTexts[weapon.toLowerCase()] = text;
         });
 
-        // Chame as atualizações iniciais aqui, se não forem feitas pelo player/configManager
+        // Atualizações iniciais
         this.updateScore(this.player.score);
         this.updateHealth(this.player.health, this.player.maxHealth);
-        this.updateWave(savedData.currentWave !== undefined ? savedData.currentWave : 0);
+        this.updateWave(savedData.currentWave ?? 0);
         this.updateWeaponDisplay(this.initialWeaponName);
     }
 
-    // Método para ser chamado no update da MainGameScene, se necessário
     update() {
-        // A HUD pode ser atualizada de forma mais granular por outros sistemas
-        // Ou você pode chamar métodos específicos aqui se quiser uma atualização geral em cada frame.
-        // Por exemplo, a vida do player pode mudar sem uma ação explícita da HUD, então atualizamos aqui.
         this.updateHealth(this.player.health, this.player.maxHealth);
     }
 
     updateScore(newScore) {
         this.scoreText.setText(`Pontos: ${newScore}`);
+        // Pequena animação de escala
+        this.scene.tweens.add({
+            targets: this.scoreText,
+            scale: { from: 1.2, to: 1 },
+            duration: 200,
+            ease: 'Power1'
+        });
     }
 
     updateHealth(currentHealth, maxHealth) {
         this.healthText.setText(`Vida: ${currentHealth}/${maxHealth}`);
-        // Mudar a cor do texto de vida conforme a porcentagem, por exemplo
-        if (currentHealth < maxHealth * 0.2) {
-            this.healthText.setColor('#f00'); // Vermelho
-        } else if (currentHealth < maxHealth * 0.5) {
-            this.healthText.setColor('#ff0'); // Amarelo
-        } else {
-            this.healthText.setColor('#0f0'); // Verde
-        }
+
+        // Gradiente de cor
+        const percentage = currentHealth / maxHealth;
+        let color;
+        if (percentage > 0.5) color = Phaser.Display.Color.Interpolate.ColorWithColor(
+            new Phaser.Display.Color(255, 255, 0), // Amarelo
+            new Phaser.Display.Color(0, 255, 0),   // Verde
+            1, percentage
+        );
+        else color = Phaser.Display.Color.Interpolate.ColorWithColor(
+            new Phaser.Display.Color(255, 0, 0),   // Vermelho
+            new Phaser.Display.Color(255, 255, 0), // Amarelo
+            1, percentage * 2
+        );
+        const hex = Phaser.Display.Color.GetColor(color.r, color.g, color.b);
+        this.healthText.setColor('#' + hex.toString(16).padStart(6, '0'));
     }
 
     updateWave(newWave) {
         this.waveText.setText(`Onda: ${newWave}`);
+        // Shake leve ao trocar onda
+        this.scene.tweens.add({
+            targets: this.waveText,
+            x: this.waveText.x + 5,
+            yoyo: true,
+            repeat: 1,
+            duration: 100
+        });
     }
 
     updateWeaponDisplay(currentWeaponName) {
         this.weaponNames.forEach(weapon => {
-            if (this.weaponTexts[weapon.toLowerCase()]) {
-                this.weaponTexts[weapon.toLowerCase()].setColor(weapon.toLowerCase() === currentWeaponName.toLowerCase() ? '#FFD700' : '#FFFFFF');
+            const lower = weapon.toLowerCase();
+            if (this.weaponTexts[lower]) {
+                const isCurrent = lower === currentWeaponName.toLowerCase();
+                this.weaponTexts[lower].setColor(isCurrent ? '#FFD700' : '#FFFFFF');
+
+                // Neon glow effect
+                this.weaponBgs[lower].setFillStyle(isCurrent ? 0xffd700 : 0x20232a, 0.8);
+                this.scene.tweens.add({
+                    targets: this.weaponBgs[lower],
+                    scale: { from: 1.05, to: 1 },
+                    duration: 150,
+                    ease: 'Power1'
+                });
             }
         });
     }
 
-    // Resetar HUD para o estado inicial (Game Over)
     reset() {
         this.updateScore(0);
         this.updateHealth(config.PLAYER_INITIAL_HEALTH, config.PLAYER_INITIAL_MAX_HEALTH);
@@ -95,3 +171,4 @@ class HUD {
 }
 
 export default HUD;
+    
