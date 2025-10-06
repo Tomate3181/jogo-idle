@@ -5,6 +5,7 @@ import Shop from "../systems/Shop.js";
 import HUD from "../systems/HUD.js";
 import ConfigManager from "../systems/ConfigManager.js";
 import { WeaponFactory } from "../weapons/WeaponFactory.js";
+import CoinManager from '../systems/coinManager.js';
 
 class MainGameScene extends Phaser.Scene {
   constructor() {
@@ -16,7 +17,9 @@ class MainGameScene extends Phaser.Scene {
     this.shop = null;
     this.hud = null;
     this.configManager = null;
-    this.coins = null;
+    // this.coins = null; // Remova este, o CoinManager vai gerenciar as moedas
+
+    this.coinManager = null; // Adicione a propriedade para o CoinManager
 
     this.currentWeapon = null;
     this.weapons = {};
@@ -31,16 +34,14 @@ class MainGameScene extends Phaser.Scene {
 
   preload() {
     this.load.image("player", "assets/player.png");
-    this.load.image("coin", "assets/coin.png");
+    this.load.image("coin", "assets/coin.png"); // Já está aqui, ótimo!
     this.load.image("enemy", "assets/enemy.png");
-    this.load.image("crate", "assets/crate.png"); // Caminho correto para o baú
-    this.load.image("bullet", "assets/bullet.png"); // Imagem para as balas da pistola
+    this.load.image("crate", "assets/crate.png");
+    this.load.image("bullet", "assets/bullet.png");
   }
 
   create() {
     // Inicializa o gerenciador de save/load ANTES de criar outros objetos que dependem dele
-    // ConfigManager agora faz o loadGame
-    // Passa null para player, enemiesGroup, hud inicialmente, e inicializa com init() depois
     this.configManager = new ConfigManager(this, null, null, null);
     const savedData = this.scene.settings.data?.loadSave
       ? this.configManager.loadGame()
@@ -50,7 +51,7 @@ class MainGameScene extends Phaser.Scene {
     this.enemies = this.physics.add.group({ runChildUpdate: true });
     this.bullets = this.physics.add.group();
     this.enemyBullets = this.physics.add.group();
-    this.coins = this.physics.add.group();
+    // this.coins = this.physics.add.group(); // Remova esta linha, CoinManager gerenciará o grupo
 
     // Player
     this.player = new Player(
@@ -100,8 +101,22 @@ class MainGameScene extends Phaser.Scene {
       savedData
     );
 
+    // --- Inicialização do CoinManager ---
+    // Passe a cena, o player e a HUD
+    this.coinManager = new CoinManager(this, this.player, this.hud);
+    // Se houver dados salvos para o CoinManager, carregue-os
+    if (savedData && savedData.coinManager) {
+      this.coinManager.load(savedData.coinManager);
+      // this.hud.updateScore(this.coinManager.getScore()); // Garante que a HUD reflita o score carregado
+    }
+    this.hud.updateScore(this.coinManager.getScore());
+    // O CoinManager já configura o spawn contínuo em seu construtor
+    // e já chama spawnCoins() pela primeira vez no time event.
+    // this.coinManager.spawnCoins(); // Opcional: para spawnar algumas moedas imediatamente, sem esperar o primeiro intervalo.
+
     // Shop
-    this.shop = new Shop(this, this.player, this.hud, this.coins);
+    // O Shop precisará de uma referência ao CoinManager para upgrades de moedas e ímã
+    this.shop = new Shop(this, this.player, this.hud, this.coinManager); // Passe o coinManager
 
     // Re-inicializa o ConfigManager com o player e hud AGORA que eles existem
     this.configManager.init(
@@ -111,9 +126,6 @@ class MainGameScene extends Phaser.Scene {
       this.bullets,
       this.enemyBullets
     );
-
-    // Spawn inicial de moedas
-    this.spawnInitialCoins();
 
     // Input para troca de armas
     this.input.keyboard.on("keydown-ONE", () => {
@@ -127,13 +139,15 @@ class MainGameScene extends Phaser.Scene {
     this.pointer = this.input.activePointer;
 
     // --- Adição de colisões e overlaps ---
+    // Colisão do player com as moedas (usando o grupo do CoinManager)
     this.physics.add.overlap(
       this.player,
-      this.coins,
-      this.player.collectCoin,
+      this.coinManager.coins, // Use o grupo de moedas do CoinManager
+      this.coinManager.collectCoin, // O CoinManager tem o método de coleta
       null,
-      this.player
+      this.coinManager // O CoinManager é o contexto (this) para collectCoin
     );
+
     this.physics.add.overlap(
       this.player,
       this.enemies,
@@ -165,41 +179,30 @@ class MainGameScene extends Phaser.Scene {
       this.configManager
     );
 
-    // Timer para salvar o jogo periodicamente (ConfigManager faz o save)
+    // Timer para salvar o jogo periodicamente
     this.time.addEvent({
       delay: 5000,
-      callback: () =>
+      callback: () => {
+        const coinManagerData = this.coinManager.getSaveData(); // Pega os dados do CoinManager
         this.configManager.saveGame({
-          score: this.player.score,
-          speedLevel: this.player.speedLevel,
-          coinLevel: this.player.coinLevel,
-          magnetLevel: this.player.magnetLevel,
+          score: this.coinManager.getScore(), // Pega o score do CoinManager
+          speedLevel: this.player.speedLevel, // Ainda do player
+          // As propriedades abaixo (maxCoins, magnetLevel, upgradeCosts) agora vêm do CoinManager ou do Shop, que as delega ao CoinManager
+          coinManager: coinManagerData, // Salva os dados do CoinManager
           playerSpeed: this.player.speed,
-          maxCoins: this.shop.maxCoinsSpawned,
-          upgradeCostSpeed: this.shop.getUpgradeCost("speed"),
-          upgradeCostCoins: this.shop.getUpgradeCost("coins"),
-          magnetCost: this.shop.getUpgradeCost("magnet"),
           playerHealth: this.player.health,
           playerMaxHealth: this.player.maxHealth,
           playerDamage: this.player.damage,
           currentWave: this.configManager.currentWave,
           currentWorld: this.configManager.currentWorld,
-        }),
+          // shopUpgrades: this.shop.getSaveData() // Se o shop tiver dados a salvar
+        });
+      },
       loop: true,
     });
 
     // Escuta o evento de morte do player para reiniciar o jogo
-    // A instância do player já emite player-died, então escutamos diretamente nele
     this.player.on("player-died", this.restartGame, this);
-
-    // O ConfigManager já escuta 'enemy-died'. Não precisamos de outro listener aqui.
-    // O `forEach` abaixo adicionava múltiplos listeners ao reiniciar a cena.
-    // this.enemies.getChildren().forEach(enemy => {
-    //     if (!enemy.listenerAdded) {
-    //         enemy.on('enemy-died', this.handleEnemyDeath, this);
-    //         enemy.listenerAdded = true;
-    //     }
-    // });
 
     // Se o debug mode estiver ativado, exibe os bodies de física
     if (config.DEBUG_MODE) {
@@ -212,8 +215,8 @@ class MainGameScene extends Phaser.Scene {
     // Atualiza o player (movimento, rotação)
     this.player.update(this.keys, this.pointer, time);
 
-    // Lógica do ímã (agora no Shop)
-    this.shop.magnetLogic(); // Não precisa passar time e delta aqui, o shop já tem acesso ao time da cena
+    // --- Chame o update do ímã do CoinManager aqui ---
+    this.coinManager.updateMagnet(this.player);
 
     // Lógica de ataque do player
     if (this.pointer.isDown && this.currentWeapon) {
@@ -226,20 +229,8 @@ class MainGameScene extends Phaser.Scene {
 
   // --- Métodos Auxiliares ---
 
-  spawnInitialCoins() {
-    let currentCoins = this.coins.getChildren().filter((c) => c.active).length;
-    while (currentCoins < this.shop.maxCoinsSpawned) {
-      let x = Phaser.Math.Between(50, config.GAME_WIDTH - 250);
-      let y = Phaser.Math.Between(50, config.GAME_HEIGHT - 50);
-      let coin = this.coins.create(x, y, "coin").setScale(0.1);
-      coin.setActive(true).setVisible(true);
-      if (coin.body) {
-        coin.body.setCollideWorldBounds(false);
-        coin.body.setCircle(coin.width * 0.5); // Garante que a colisão seja um círculo
-      }
-      currentCoins++;
-    }
-  }
+  // spawnInitialCoins() não é mais necessário aqui, o CoinManager cuida disso.
+  // Pode ser removido.
 
   equipWeapon(weaponType) {
     if (this.weapons[weaponType]) {
@@ -253,16 +244,11 @@ class MainGameScene extends Phaser.Scene {
     if (bullet.active && enemy.active) {
       bullet.destroy();
       enemy.takeDamage(bullet.damage);
-      // O evento 'enemy-died' será emitido pelo próprio inimigo se ele morrer
       if (!enemy.active) {
-        // Aumenta a pontuação apenas uma vez por morte
-        this.player.addScore(
-          config.COIN_POINTS_VALUE * 2 + this.configManager.currentWave * 2
-        );
-        this.hud.updateScore(this.player.score);
-        // ConfigManager já escuta o evento 'enemy-died' para lógica de boss, etc.
-        // Mas, se o inimigo morreu, ele mesmo emitirá 'enemy-died' para a cena
-        // e o ConfigManager que escuta a cena, vai lidar com isso.
+        // Quando um inimigo morre, adicione moedas
+        this.coinManager.setScore(this.coinManager.getScore() + config.COIN_POINTS_VALUE * 2 + this.configManager.currentWave * 2);
+        // Não é necessário atualizar a HUD diretamente aqui, o CoinManager já chama hud.updateScore()
+        // quando o score é setado ou uma moeda é coletada via collectCoin.
       }
     }
   }
@@ -275,16 +261,9 @@ class MainGameScene extends Phaser.Scene {
     }
   }
 
-  // O método handleEnemyDeath na MainGameScene não é estritamente necessário
-  // se o ConfigManager já estiver lidando com a lógica de pontuação e boss
-  // ao receber o evento 'enemy-died'.
-  // No entanto, se você quiser que a MainGameScene faça algo adicional
-  // ao receber este evento, você pode mantê-lo.
   handleEnemyDeath(enemy) {
-    // A pontuação já é adicionada em handleBulletHitEnemy
-    // ou você pode mover TODA a lógica de pontuação para cá.
-    // Por simplicidade, vou manter a pontuação onde está (handleBulletHitEnemy)
-    // e deixar o ConfigManager lidar com a lógica de boss.
+    // Este método agora é menos crítico, pois o score é atualizado em handleBulletHitEnemy
+    // e o ConfigManager lida com a lógica da onda/boss.
   }
 
   restartGame() {

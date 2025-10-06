@@ -11,6 +11,7 @@ const config = {
     PLAYER_HIT_COOLDOWN: 500, // Tempo em ms entre hits do player por inimigos
 
     // Coins
+    INITIAL_MAX_COINS: 2,
     COIN_INITIAL_MAX_ON_SCREEN: 2,
     COIN_SPAWN_INTERVAL: 2000, // ms
     COIN_POINTS_VALUE: 5,

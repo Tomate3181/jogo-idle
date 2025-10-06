@@ -1,27 +1,28 @@
 import config from '../config.js';
 
 class Shop {
-    constructor(scene, player, hud, coinsGroup) {
+    // Agora o Shop recebe o coinManager em vez de coinsGroup
+    constructor(scene, player, hud, coinManager) { 
         this.scene = scene;
         this.player = player;
         this.hud = hud;
-        this.coinsGroup = coinsGroup; // Grupo de moedas para a lógica do ímã
+        this.coinManager = coinManager; // Armazena a referência ao CoinManager
 
-        // Custos de upgrades (podem ser carregados de savedData no Player ou aqui)
-        // Para simplificar, o player.js já carrega o nível. Aqui calculamos o custo com base no nível do player.
+        // Os custos dos upgrades são baseados nos NÍVEIS que são controlados por Player e CoinManager
         this.upgradeCosts = {
+            // O score agora vem do CoinManager, mas os níveis de upgrade ainda estão no player
             speed: config.UPGRADE_COST_SPEED_INITIAL + (player.speedLevel - 1) * config.UPGRADE_INCREASE_SPEED,
-            coins: config.UPGRADE_COST_COINS_INITIAL + (player.coinLevel - 1) * config.UPGRADE_INCREASE_COINS,
-            magnet: config.UPGRADE_COST_MAGNET_INITIAL + (player.magnetLevel) * config.UPGRADE_INCREASE_MAGNET, // MagnetLevel 0 para inicial
+            coins: config.UPGRADE_COST_COINS_INITIAL + (this.coinManager.maxCoins - config.INITIAL_MAX_COINS) * config.UPGRADE_INCREASE_COINS, // Baseado no maxCoins do CoinManager
+            magnet: config.UPGRADE_COST_MAGNET_INITIAL + (this.coinManager.magnetLevel) * config.UPGRADE_INCREASE_MAGNET, // Baseado no magnetLevel do CoinManager
             maxHealth: config.UPGRADE_COST_MAX_HEALTH_INITIAL + (Math.floor((player.maxHealth - config.PLAYER_INITIAL_MAX_HEALTH) / config.UPGRADE_INCREASE_MAX_HEALTH)) * config.UPGRADE_INCREASE_MAX_HEALTH,
             damage: config.UPGRADE_COST_DAMAGE_INITIAL + (Math.floor((player.damage - config.PLAYER_INITIAL_DAMAGE) / config.UPGRADE_INCREASE_DAMAGE)) * config.UPGRADE_INCREASE_DAMAGE
         };
 
-        this.shopTexts = {}; // Para armazenar referências aos textos dos botões
+        this.shopTexts = {};
         this.createShopUI();
 
-        // Adiciona um evento de atualização na cena para a lógica do ímã
-        this.scene.events.on('update', this.magnetLogic, this);
+        // REMOVIDO: this.scene.events.on('update', this.magnetLogic, this);
+        // A lógica do ímã é responsabilidade do CoinManager e seu update() na cena principal.
         this.scene.events.once('shutdown', this.destroy, this);
     }
 
@@ -38,8 +39,9 @@ class Shop {
 
         const upgrades = [
             { key: 'speed', display: 'Velocidade', action: () => this.buyUpgrade('speed', config.UPGRADE_INCREASE_SPEED, this.player.upgradeSpeed, this.player.speedLevel) },
-            { key: 'coins', display: 'Mais Moedas', action: () => this.buyUpgrade('coins', 1, this.player.upgradeCoinLevel, this.player.coinLevel) },
-            { key: 'magnet', display: 'Ímã', action: () => this.buyUpgrade('magnet', 1, this.player.upgradeMagnetLevel, this.player.magnetLevel) },
+            // Ação de 'coins' e 'magnet' agora chama os métodos do CoinManager
+            { key: 'coins', display: 'Mais Moedas', action: () => this.buyUpgrade('coins', 1, this.coinManager.upgradeMaxCoins, this.coinManager.maxCoins) },
+            { key: 'magnet', display: 'Ímã', action: () => this.buyUpgrade('magnet', 1, this.coinManager.upgradeMagnet, this.coinManager.magnetLevel) },
             { key: 'maxHealth', display: 'Vida Max', action: () => this.buyUpgrade('maxHealth', config.UPGRADE_INCREASE_MAX_HEALTH, this.player.upgradeMaxHealth, Math.floor((this.player.maxHealth - config.PLAYER_INITIAL_MAX_HEALTH) / config.UPGRADE_INCREASE_MAX_HEALTH) + 1) },
             { key: 'damage', display: 'Dano', action: () => this.buyUpgrade('damage', config.UPGRADE_INCREASE_DAMAGE, this.player.upgradeDamage, Math.floor((this.player.damage - config.PLAYER_INITIAL_DAMAGE) / config.UPGRADE_INCREASE_DAMAGE) + 1) }
         ];
@@ -65,15 +67,23 @@ class Shop {
             btnZone.on('pointerout', () => btnGraphics.clear().fillStyle(0x555555, 1).fillRoundedRect(10, yPos, config.SHOP_ITEM_WIDTH, config.SHOP_ITEM_HEIGHT, 12));
         });
 
-        this.updateShopUI(); // Atualiza os textos da loja com os valores iniciais/carregados
+        this.updateShopUI();
     }
 
-    buyUpgrade(key, amountToIncrease, playerMethod, currentLevel) {
+    buyUpgrade(key, amountToIncrease, methodToCall, currentLevel) {
         let cost = this.upgradeCosts[key];
-        if (this.player.score >= cost) {
-            this.player.score -= cost;
-            playerMethod.call(this.player, amountToIncrease, cost); // Chama o método do player
-            this.hud.updateScore(this.player.score); // Atualiza score na HUD
+        // O score agora é gerenciado pelo CoinManager
+        if (this.coinManager.getScore() >= cost) {
+            this.coinManager.setScore(this.coinManager.getScore() - cost); // Reduz o score via CoinManager
+            
+            // Chama o método apropriado, com o contexto correto
+            if (key === 'coins' || key === 'magnet') {
+                methodToCall.call(this.coinManager, amountToIncrease); // Chama o método do CoinManager
+            } else {
+                methodToCall.call(this.player, amountToIncrease, cost); // Chama o método do Player
+            }
+            
+            this.hud.updateScore(this.coinManager.getScore()); // Atualiza score na HUD usando o CoinManager
 
             // Atualiza o custo para o próximo nível
             switch (key) {
@@ -83,18 +93,18 @@ class Shop {
                 case 'maxHealth': this.upgradeCosts.maxHealth += config.UPGRADE_INCREASE_MAX_HEALTH; break;
                 case 'damage': this.upgradeCosts.damage += config.UPGRADE_INCREASE_DAMAGE; break;
             }
-            this.updateShopUI(); // Atualiza UI da loja
+            this.updateShopUI();
             this.hud.updateHealth(this.player.health, this.player.maxHealth); // Para o caso de MaxHealth
         } else {
-            // Feedback visual ou sonoro de dinheiro insuficiente
             console.log("Pontos insuficientes para: " + key);
         }
     }
 
     updateShopUI() {
         this.shopTexts['speed'].setText(`Velocidade (Nível ${this.player.speedLevel})\nPreço: ${this.upgradeCosts.speed}`);
-        this.shopTexts['coins'].setText(`Mais Moedas (Nível ${this.player.coinLevel})\nPreço: ${this.upgradeCosts.coins}`);
-        this.shopTexts['magnet'].setText(`Ímã (Nível ${this.player.magnetLevel})\nPreço: ${this.upgradeCosts.magnet}`);
+        // As informações de nível de moedas e ímã vêm do CoinManager
+        this.shopTexts['coins'].setText(`Mais Moedas (Nível ${this.coinManager.maxCoins})\nPreço: ${this.upgradeCosts.coins}`);
+        this.shopTexts['magnet'].setText(`Ímã (Nível ${this.coinManager.magnetLevel})\nPreço: ${this.upgradeCosts.magnet}`);
         this.shopTexts['maxHealth'].setText(`Vida Max (Nível ${Math.floor((this.player.maxHealth - config.PLAYER_INITIAL_MAX_HEALTH) / config.UPGRADE_INCREASE_MAX_HEALTH) + 1})\nPreço: ${this.upgradeCosts.maxHealth}`);
         this.shopTexts['damage'].setText(`Dano (Nível ${Math.floor((this.player.damage - config.PLAYER_INITIAL_DAMAGE) / config.UPGRADE_INCREASE_DAMAGE) + 1})\nPreço: ${this.upgradeCosts.damage}`);
     }
@@ -103,47 +113,10 @@ class Shop {
         return this.upgradeCosts[key];
     }
 
-    // --- Lógica do Ímã ---
-    magnetLogic() {
-        if (this.player.magnetLevel > 0) {
-            const magnetSpeed = config.MAGNET_BASE_SPEED + (this.player.magnetLevel - 1) * config.MAGNET_SPEED_PER_LEVEL;
-            const magnetRange = config.MAGNET_BASE_RANGE + (this.player.magnetLevel - 1) * config.MAGNET_RANGE_PER_LEVEL;
-
-            this.coinsGroup.getChildren().forEach(coin => {
-                if (!coin.active) return;
-
-                const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, coin.x, coin.y);
-
-                if (dist <= magnetRange) {
-                    const speedFactor = Phaser.Math.Clamp(1 - (dist / magnetRange), 0.2, 1);
-                    const appliedSpeed = magnetSpeed * (0.5 + speedFactor);
-
-                    const cAngle = Phaser.Math.Angle.Between(coin.x, coin.y, this.player.x, this.player.y);
-                    const vx = Math.cos(cAngle) * appliedSpeed;
-                    const vy = Math.sin(cAngle) * appliedSpeed;
-                    coin.body.setVelocity(vx, vy);
-
-                    // Coleta instantânea se muito próximo
-                    if (dist <= config.COIN_COLLECT_DISTANCE) {
-                        this.player.collectCoin(this.player, coin);
-                        this.hud.updateScore(this.player.score); // Atualiza score na HUD
-                    }
-                } else {
-                    coin.body.setVelocity(0, 0); // Moedas param de se mover se fora do alcance
-                }
-
-                // Clamp dentro da área de jogo (apenas para as moedas que não foram coletadas e se moveram)
-                if (coin.active && (coin.x < 0 || coin.x > config.GAME_WIDTH || coin.y < 0 || coin.y > config.GAME_HEIGHT)) {
-                    coin.x = Phaser.Math.Clamp(coin.x, 16, config.GAME_WIDTH - 16);
-                    coin.y = Phaser.Math.Clamp(coin.y, 16, config.GAME_HEIGHT - 16);
-                    coin.body.setVelocity(0, 0);
-                }
-            });
-        }
-    }
+    // REMOVIDO: Toda a função magnetLogic()
+    // Agora é responsabilidade do CoinManager.updateMagnet()
 
     reset() {
-        // Redefine os custos de upgrade com base nos níveis iniciais do player ou nos valores padrão
         this.upgradeCosts = {
             speed: config.UPGRADE_COST_SPEED_INITIAL,
             coins: config.UPGRADE_COST_COINS_INITIAL,
@@ -155,7 +128,8 @@ class Shop {
     }
 
     destroy() {
-        this.scene.events.off('update', this.magnetLogic, this);
+        // REMOVIDO: this.scene.events.off('update', this.magnetLogic, this);
+        // O evento de update para magnetLogic não é mais escutado.
         // ... limpar outros elementos da UI da loja se necessário
     }
 }
