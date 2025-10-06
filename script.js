@@ -9,7 +9,7 @@ const config = {
 const game = new Phaser.Game(config);
 
 let player;
-let cursors;
+let keys; // Alterado de cursors para keys para W,A,S,D
 let coins;
 let score = 0;
 let scoreText;
@@ -38,9 +38,32 @@ let magnetDuration = 5000;
 // Guardar textos da loja para atualização
 let shopTexts = {};
 
+// --- VARIÁVEIS DE COMBATE ---
+let enemies;
+let currentWeapon = 'pistol';
+let inventory = ['pistol', 'sword'];
+let bullets;
+let lastShot = 0; // cooldown
+let fireRate = 300; // ms entre tiros
+let swordAttackCooldown = 500; // Cooldown para ataque de espada
+let lastSwordAttack = 0;
+let pointer;
+
+let playerHealth = 100;
+let playerMaxHealth = 100;
+let playerDamage = 10;
+let healthText;
+
+let enemySpawnTimer;
+let maxEnemies = 3; // Quantidade máxima de inimigos na tela
+
 function preload() {
     this.load.image('player', 'player.png');
     this.load.image('coin', 'coin.png');
+    // **NOVO:** Carregue uma imagem para o inimigo. Se não tiver, pode usar um quadrado simples.
+    // Para fins de teste, vou simular um "quadrado vermelho" como textura.
+    // Você pode substituir 'red_square' por 'enemy.png' se tiver uma imagem.
+    this.load.image('red_square', 'enemy.png'); // Imagem temporária de quadrado vermelho
 }
 
 // --- LOCAL STORAGE ---
@@ -48,7 +71,8 @@ function saveGame() {
     const saveData = {
         score, speedLevel, coinLevel, magnetLevel,
         playerSpeed, maxCoins,
-        upgradeCostSpeed, upgradeCostCoins, magnetCost
+        upgradeCostSpeed, upgradeCostCoins, magnetCost,
+        playerHealth, playerMaxHealth, playerDamage // Salvar atributos de combate
     };
     localStorage.setItem('idleGameSave', JSON.stringify(saveData));
 }
@@ -57,29 +81,28 @@ function loadGame() {
     const saved = localStorage.getItem('idleGameSave');
     if (saved) {
         const data = JSON.parse(saved);
-        score = data.score || 0;
-        speedLevel = data.speedLevel || 1;
-        coinLevel = data.coinLevel || 1;
-        magnetLevel = data.magnetLevel || 0;
-        playerSpeed = data.playerSpeed || 100;
-        maxCoins = data.maxCoins || 2;
-        upgradeCostSpeed = data.upgradeCostSpeed || 50;
-        upgradeCostCoins = data.upgradeCostCoins || 100;
-        magnetCost = data.magnetCost || 150;
+        score = data.score !== undefined ? data.score : 0;
+        speedLevel = data.speedLevel !== undefined ? data.speedLevel : 1;
+        coinLevel = data.coinLevel !== undefined ? data.coinLevel : 1;
+        magnetLevel = data.magnetLevel !== undefined ? data.magnetLevel : 0;
+        playerSpeed = data.playerSpeed !== undefined ? data.playerSpeed : 100;
+        maxCoins = data.maxCoins !== undefined ? data.maxCoins : 2;
+        upgradeCostSpeed = data.upgradeCostSpeed !== undefined ? data.upgradeCostSpeed : 50;
+        upgradeCostCoins = data.upgradeCostCoins !== undefined ? data.upgradeCostCoins : 100;
+        magnetCost = data.magnetCost !== undefined ? data.magnetCost : 150;
+
+        playerHealth = data.playerHealth !== undefined ? data.playerHealth : 100;
+        playerMaxHealth = data.playerMaxHealth !== undefined ? data.playerMaxHealth : 100;
+        playerDamage = data.playerDamage !== undefined ? data.playerDamage : 10;
     }
 }
 
-let currentWeapon = 'pistol';
-let inventory = ['pistol', 'sword'];
-let bullets;
-let lastShot = 0; // cooldown
-let fireRate = 300; // ms entre tiros
-let pointer;
+let hudTexts = {}; // Vai guardar referências para atualizar a HUD
 
 function create() {
     loadGame(); // carrega progresso salvo
 
-    // substitui cursors
+    // Substitui cursors por W,A,S,D
     keys = this.input.keyboard.addKeys({
         up: Phaser.Input.Keyboard.KeyCodes.W,
         down: Phaser.Input.Keyboard.KeyCodes.S,
@@ -87,21 +110,22 @@ function create() {
         right: Phaser.Input.Keyboard.KeyCodes.D
     });
 
-
     // Player
     player = this.physics.add.sprite(400, 300, 'player')
         .setCollideWorldBounds(true)
         .setScale(0.1);
+    player.health = playerHealth; // Adiciona propriedade de saúde ao player sprite
+    player.maxHealth = playerMaxHealth;
+    player.damage = playerDamage;
 
     // Moedas
     coins = this.physics.add.group();
     spawnCoins(this);
 
     // Texto da pontuação
-    scoreText = this.add.text(16, 16, `Pontos: ${score}`, { fontSize: '32px', fill: '#fff' });
-
-    // Controles
-    cursors = this.input.keyboard.createCursorKeys();
+    scoreText = this.add.text(16, 16, `Pontos: ${score}`, { fontSize: '24px', fill: '#fff' });
+    // Texto da saúde do jogador
+    healthText = this.add.text(16, 48, `Vida: ${player.health}/${player.maxHealth}`, { fontSize: '24px', fill: '#0f0' });
 
     // Colisão player-moeda
     this.physics.add.overlap(player, coins, collectCoin, null, this);
@@ -119,10 +143,18 @@ function create() {
     // Grupo de inimigos
     enemies = this.physics.add.group();
 
-    // spawn inicial
-    spawnEnemy(this);
+    // Spawn inicial e contínuo de inimigos
+    enemySpawnTimer = this.time.addEvent({
+        delay: 3000, // Spawn a cada 3 segundos
+        callback: () => {
+            if (enemies.getChildren().length < maxEnemies) {
+                spawnEnemy(this);
+            }
+        },
+        loop: true
+    });
 
-    // colisão inimigo ↔ player
+    // Colisão inimigo ↔ player
     this.physics.add.overlap(player, enemies, hitEnemy, null, this);
 
     // Grupo de projéteis
@@ -138,8 +170,6 @@ function create() {
         updateHUD();
     });
 
-
-
     // Colisão balas ↔ inimigos
     this.physics.add.overlap(bullets, enemies, bulletHitEnemy, null, this);
 
@@ -147,8 +177,6 @@ function create() {
     pointer = this.input.activePointer;
 
     // HUD container
-    hudTexts = {}; // vai guardar referências para atualizar
-
     const startX = config.width - 150; // canto direito
     const startY = config.height - 80; // canto inferior
     const spacingY = 40;
@@ -168,7 +196,7 @@ function create() {
         hudTexts[weapon] = text;
     });
 
-
+    updateHUD(); // Atualiza a HUD na criação
 }
 
 function updateHUD() {
@@ -177,9 +205,8 @@ function updateHUD() {
             hudTexts[weapon].setColor(weapon === currentWeapon ? '#FFD700' : '#FFFFFF');
         }
     });
+    healthText.setText(`Vida: ${player.health}/${player.maxHealth}`);
 }
-
-
 
 // Parâmetros do ímã
 let baseMagnetSpeed = 50;  // nível 1
@@ -192,7 +219,6 @@ function collectCoin(player, coin) {
     saveGame(); // salva progresso
 }
 
-// Spawn de moedas aleatórias
 // Use estas constantes (defina no topo junto com outras variáveis)
 const GAME_WIDTH = 800;   // área de jogo onde player e moedas devem permanecer
 const GAME_HEIGHT = 600;
@@ -270,7 +296,9 @@ function update(time, delta) {
 
     // ---- Inimigos perseguindo ----
     enemies.getChildren().forEach(enemy => {
-        this.physics.moveToObject(enemy, player, 80);
+        if (enemy.active) {
+            this.physics.moveToObject(enemy, player, enemy.speed); // Usar a velocidade do inimigo
+        }
     });
 
     // ---- Armas ----
@@ -278,8 +306,9 @@ function update(time, delta) {
         if (currentWeapon === 'pistol' && time > lastShot + fireRate) {
             shootBullet(this, angle);
             lastShot = time;
-        } else if (currentWeapon === 'sword') {
+        } else if (currentWeapon === 'sword' && time > lastSwordAttack + swordAttackCooldown) {
             swordAttack(this, angle);
+            lastSwordAttack = time;
         }
     }
 }
@@ -293,7 +322,7 @@ function createShop(scene) {
     // Fundo semi-transparente
     let graphics = scene.add.graphics();
     graphics.fillStyle(0x333333, 0.8);
-    graphics.fillRoundedRect(0, 0, 180, 300, 16);
+    graphics.fillRoundedRect(0, 0, 180, 400, 16); // Aumentei a altura para novos upgrades
     shopContainer.add(graphics);
 
     // Título
@@ -304,11 +333,13 @@ function createShop(scene) {
     const upgrades = [
         { key: 'Velocidade', cost: upgradeCostSpeed, action: () => buySpeed(scene) },
         { key: 'Mais Moedas', cost: upgradeCostCoins, action: () => buyCoins(scene) },
-        { key: 'Ímã', cost: magnetCost, action: () => buyMagnet(scene) }
+        { key: 'Ímã', cost: magnetCost, action: () => buyMagnet(scene) },
+        { key: 'Vida Max', cost: 75, action: () => buyMaxHealth(scene) }, // Novo upgrade
+        { key: 'Dano', cost: 100, action: () => buyPlayerDamage(scene) }  // Novo upgrade
     ];
 
     upgrades.forEach((upgrade, index) => {
-        let yPos = 50 + index * 90;
+        let yPos = 50 + index * 80; // Ajuste no espaçamento
 
         // Botão
         let btnGraphics = scene.add.graphics();
@@ -318,11 +349,14 @@ function createShop(scene) {
 
         // Texto do botão
         let level = 0;
-        if (upgrade.key === 'Velocidade') level = speedLevel;
-        if (upgrade.key === 'Mais Moedas') level = coinLevel;
-        if (upgrade.key === 'Ímã') level = magnetLevel;
+        let cost = upgrade.cost;
+        if (upgrade.key === 'Velocidade') { level = speedLevel; cost = upgradeCostSpeed; }
+        if (upgrade.key === 'Mais Moedas') { level = coinLevel; cost = upgradeCostCoins; }
+        if (upgrade.key === 'Ímã') { level = magnetLevel; cost = magnetCost; }
+        if (upgrade.key === 'Vida Max') { level = Math.floor((playerMaxHealth - 100) / 25) + 1; cost = 75 + (level - 1) * 25; }
+        if (upgrade.key === 'Dano') { level = Math.floor((playerDamage - 10) / 5) + 1; cost = 100 + (level - 1) * 50; }
 
-        let btnText = scene.add.text(90, yPos + 35, `${upgrade.key} (Nível ${level})\nPreço: ${upgrade.cost}`,
+        let btnText = scene.add.text(90, yPos + 35, `${upgrade.key} (Nível ${level})\nPreço: ${cost}`,
             { fontSize: '14px', fill: '#fff', align: 'center' }).setOrigin(0.5);
         shopContainer.add(btnText);
         shopTexts[upgrade.key] = btnText;
@@ -371,31 +405,84 @@ function buyMagnet(scene) {
         scoreText.setText(`Pontos: ${score}`);
         updateShop();
         saveGame();
-
-        magnetActive = true;
-        scene.time.delayedCall(magnetDuration + magnetLevel * 1000, () => {
-            magnetActive = false;
-        });
     }
 }
+
+function buyMaxHealth(scene) {
+    let currentCost = 75 + (Math.floor((playerMaxHealth - 100) / 25)) * 25;
+    if (score >= currentCost) {
+        score -= currentCost;
+        playerMaxHealth += 25;
+        player.maxHealth = playerMaxHealth; // Atualiza no player sprite
+        player.health = Math.min(player.health + 25, playerMaxHealth); // Cura um pouco ao aumentar a vida
+        scoreText.setText(`Pontos: ${score}`);
+        updateShop();
+        updateHUD(); // Atualiza a HUD da vida
+        saveGame();
+    }
+}
+
+function buyPlayerDamage(scene) {
+    let currentCost = 100 + (Math.floor((playerDamage - 10) / 5)) * 50;
+    if (score >= currentCost) {
+        score -= currentCost;
+        playerDamage += 5;
+        player.damage = playerDamage; // Atualiza no player sprite
+        scoreText.setText(`Pontos: ${score}`);
+        updateShop();
+        saveGame();
+    }
+}
+
 
 function spawnEnemy(scene) {
     let x = Phaser.Math.Between(50, 750);
     let y = Phaser.Math.Between(50, 550);
-    let enemy = scene.add.rectangle(x, y, 30, 30, 0xff0000); // quadrado vermelho
-    scene.physics.add.existing(enemy);
+    // **CORREÇÃO AQUI:** Crie o inimigo como um sprite
+    let enemy = scene.physics.add.sprite(x, y, 'red_square')
+        .setScale(1); // Reduzi a escala para 30x30 pixels (imagem placeholder é 30x30)
     enemy.body.setCollideWorldBounds(true);
+    enemy.health = 30; // Vida do inimigo
+    enemy.damage = 10; // Dano do inimigo
+    enemy.speed = 80; // Velocidade do inimigo
     enemies.add(enemy);
 }
 
 function hitEnemy(player, enemy) {
-    // exemplo: perder pontos
-    score = Math.max(0, score - 20);
-    scoreText.setText('Pontos: ' + score);
+    // Adiciona cooldown para o player não tomar dano o tempo todo
+    if (!player.lastHitTime) player.lastHitTime = 0;
+    const hitCooldown = 500; // Meio segundo de cooldown para tomar dano
 
-    // opcional: empurrar player ou piscar
-    player.setTint(0xff0000);
-    scene.time.delayedCall(200, () => player.clearTint());
+    if (this.time.now > player.lastHitTime + hitCooldown) {
+        player.health -= enemy.damage;
+        player.lastHitTime = this.time.now;
+
+        // Feedback visual
+        player.setTint(0xff0000); // Vermelho
+        this.time.delayedCall(200, () => player.clearTint());
+
+        updateHUD(); // Atualiza a saúde na HUD
+
+        if (player.health <= 0) {
+            // GAME OVER
+            this.scene.restart(); // Reinicia a cena
+            score = 0; // Zera a pontuação
+            // Reinicia outros estados do jogo
+            playerSpeed = 100;
+            maxCoins = 2;
+            coinSpawnInterval = 2000;
+            upgradeCostSpeed = 50;
+            upgradeCostCoins = 100;
+            magnetCost = 150;
+            speedLevel = 1;
+            coinLevel = 1;
+            magnetLevel = 0;
+            playerHealth = 100;
+            playerMaxHealth = 100;
+            playerDamage = 10;
+            saveGame(); // Salva o jogo resetado
+        }
+    }
 }
 
 // Atualiza textos da loja
@@ -403,16 +490,27 @@ function updateShop() {
     shopTexts['Velocidade'].setText(`Velocidade (Nível ${speedLevel})\nPreço: ${upgradeCostSpeed}`);
     shopTexts['Mais Moedas'].setText(`Mais Moedas (Nível ${coinLevel})\nPreço: ${upgradeCostCoins}`);
     shopTexts['Ímã'].setText(`Ímã (Nível ${magnetLevel})\nPreço: ${magnetCost}`);
+    
+    // Atualiza os novos upgrades
+    let maxHealthLevel = Math.floor((playerMaxHealth - 100) / 25) + 1;
+    let maxHealthCost = 75 + (maxHealthLevel - 1) * 25;
+    shopTexts['Vida Max'].setText(`Vida Max (Nível ${maxHealthLevel})\nPreço: ${maxHealthCost}`);
+
+    let damageLevel = Math.floor((playerDamage - 10) / 5) + 1;
+    let damageCost = 100 + (damageLevel - 1) * 50;
+    shopTexts['Dano'].setText(`Dano (Nível ${damageLevel})\nPreço: ${damageCost}`);
 }
 
 // armas
 
 // ---- Pistola ----
 function shootBullet(scene, angle) {
+    // Balas também podem ser sprites se você quiser texturas
     let bullet = scene.add.rectangle(player.x, player.y, 8, 4, 0xffffff);
     scene.physics.add.existing(bullet);
     bullets.add(bullet);
     bullet.body.setAllowGravity(false);
+    bullet.damage = player.damage; // Bala causa o dano do player
 
     // velocidade na direção do mouse
     scene.physics.velocityFromRotation(angle, 400, bullet.body.velocity);
@@ -423,31 +521,63 @@ function shootBullet(scene, angle) {
 
 // ---- Espada ----
 function swordAttack(scene, angle) {
-    if (scene.swordSwinging) return; // evita spammar
-    scene.swordSwinging = true;
-
     // Hitbox a uma distância à frente do player
     let distance = 40;
     let offsetX = Math.cos(angle) * distance;
     let offsetY = Math.sin(angle) * distance;
 
+    // Hitbox para espada pode continuar sendo um Rectangle, pois ele não precisa de setTint
     let hitbox = scene.add.rectangle(player.x + offsetX, player.y + offsetY, 50, 30, 0x00ff00, 0.3);
     scene.physics.add.existing(hitbox);
+    hitbox.body.setAllowGravity(false);
     hitbox.body.enable = true;
+    hitbox.body.setImmovable(true); // Impede que o hitbox seja movido por colisões
+    hitbox.damage = player.damage; // Hitbox da espada causa o dano do player
 
-    scene.physics.add.overlap(hitbox, enemies, (box, enemy) => {
-        enemy.destroy();
+    // Usar uma flag para garantir que o inimigo só leve dano uma vez por ataque da espada
+    let enemiesHitBySword = new Set(); 
+
+    scene.physics.overlap(hitbox, enemies, (box, enemy) => {
+        if (!enemiesHitBySword.has(enemy)) {
+            // **Passamos a cena para takeDamage para que ela possa usar time.delayedCall**
+            takeDamage.call(scene, enemy, box.damage); 
+            enemiesHitBySword.add(enemy);
+        }
     });
 
     // remover hitbox rapidinho
     scene.time.delayedCall(200, () => {
         hitbox.destroy();
-        scene.swordSwinging = false;
     });
 }
 
 // ---- Colisão balas ↔ inimigos ----
 function bulletHitEnemy(bullet, enemy) {
     bullet.destroy();
-    enemy.destroy();
+    // **Passamos a cena para takeDamage para que ela possa usar time.delayedCall**
+    takeDamage.call(this, enemy, bullet.damage);
+}
+
+// Nova função para aplicar dano a qualquer entidade (inimigo ou player)
+function takeDamage(target, amount) {
+    // **IMPORTANTE: 'this' aqui se refere à cena devido ao .call(this, ...)**
+    // Garantir que o target ainda existe e é ativo (não foi destruído por outro hit)
+    if (!target || !target.active) {
+        return;
+    }
+
+    target.health -= amount;
+
+    // Feedback visual para o inimigo
+    // target.setTint só funciona em Sprites, por isso a alteração em spawnEnemy
+    target.setTint(0xff8888); // Vermelho claro
+    // Usamos 'this.time' porque takeDamage agora está sendo chamada com o contexto da cena
+    this.time.delayedCall(150, () => target.clearTint());
+
+    if (target.health <= 0) {
+        target.destroy();
+        score += 10; // Ganha pontos por matar inimigo
+        scoreText.setText(`Pontos: ${score}`);
+        saveGame();
+    }
 }
